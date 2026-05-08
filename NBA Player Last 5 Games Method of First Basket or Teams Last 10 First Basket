@@ -11,7 +11,7 @@ import time
 import random
 
 # ================== INPUT ==================
-search_type = input("Player (P) or Team (T)? >> ").strip().upper()
+search_type = input("Please enter either Player (P) or Team (T) >> ").strip().upper()
 
 if search_type == "P":
     search_name = input("Enter the player name >> ").strip()
@@ -26,7 +26,7 @@ else:
 # ===========================================
 
 results = []
-max_results = 10
+max_results = 5
 search_order = ["Playoffs", "Regular Season"]
 
 # =========================================================
@@ -180,97 +180,240 @@ elif search_type == "T":
     team_name = matched_team['full_name']
 
     print(f"✅ Found {team_name} (Team ID: {team_id})\n")
+    # Set max_results to 10 for team queries
+    max_results = 10
+    # New Question: Choose between First Basket by Team or vs Specific Opponent
+    team_query_type = input("Do you want to see most recent first baskets (F) or versus a specific opponent(O)? >>  ").strip().upper()
 
-    print(f"Scanning for the last {max_results} games where this team scored the first basket...\n")
+    if team_query_type not in ["F", "O"]:
+        print("❌ Invalid choice.")
+        exit()
 
-    for season_type in search_order:
+    # ==================== TEAM FIRST BASKET MODE ====================
+    if team_query_type == "F":
 
-        if len(results) >= max_results:
-            break
+        print(f"Scanning for the last {max_results} games where this team scored the first basket...\n")
 
-        print(f"→ Scanning {season_type} (2025-26)...")
-
-        try:
-            gamelog = teamgamelog.TeamGameLog(
-                team_id=team_id,
-                season="2025-26",
-                season_type_all_star=season_type
-            )
-
-            games_df = gamelog.get_data_frames()[0]
-
-        except:
-            print(f"   Could not fetch {season_type} games.")
-            continue
-
-        if games_df.empty:
-            print(f"   No {season_type} games found.\n")
-            continue
-
-        for _, row in games_df.iterrows():
+        for season_type in search_order:
 
             if len(results) >= max_results:
                 break
 
-            game_id = row['Game_ID']
-            game_date = row['GAME_DATE']
-            matchup = row['MATCHUP']
-
-            print(f"   Checking {game_date} ({matchup})...", end=" ")
+            print(f"→ Scanning {season_type} (2025-26)...")
 
             try:
-                pbp = playbyplayv3.PlayByPlayV3(game_id=game_id)
-                df = pbp.get_data_frames()[0]
+                gamelog = teamgamelog.TeamGameLog(
+                    team_id=team_id,
+                    season="2025-26",
+                    season_type_all_star=season_type
+                )
 
-                made_shots = df[
-                    (df['isFieldGoal'] == 1) &
-                    (df['shotResult'] == 'Made')
-                ]
+                games_df = gamelog.get_data_frames()[0]
 
-                if made_shots.empty:
-                    print("No shots")
+            except:
+                print(f"   Could not fetch {season_type} games.")
+                continue
+
+            if games_df.empty:
+                print(f"   No {season_type} games found.\n")
+                continue
+
+            for _, row in games_df.iterrows():
+
+                if len(results) >= max_results:
+                    break
+
+                game_id = row['Game_ID']
+                game_date = row['GAME_DATE']
+                matchup = row['MATCHUP']
+
+                print(f"   Checking {game_date} ({matchup})...", end=" ")
+
+                try:
+                    pbp = playbyplayv3.PlayByPlayV3(game_id=game_id)
+                    df = pbp.get_data_frames()[0]
+
+                    made_shots = df[
+                        (df['isFieldGoal'] == 1) &
+                        (df['shotResult'] == 'Made')
+                    ]
+
+                    if made_shots.empty:
+                        print("No shots")
+                        continue
+
+                    first = made_shots.iloc[0]
+
+                    # Team can appear as home or away
+                    scoring_team_id = int(first['teamId'])
+
+                    if scoring_team_id == team_id:
+
+                        print(f"✅ {first['playerName']} scored first!")
+
+                        results.append({
+                            'date': game_date,
+                            'matchup': matchup,
+                            'season_type': season_type,
+                            'player': first['playerName'],
+                            'time': first['clock'],
+                            'description': first['description']
+                        })
+
+                    else:
+                        print("Opponent scored first")
+
+                except Exception as e:
+                    print("Connection error - waiting...")
+                    time.sleep(3)
                     continue
 
-                first = made_shots.iloc[0]
+                time.sleep(random.uniform(0.8, 1.5))
 
-                # Team can appear as home or away
-                scoring_team_id = int(first['teamId'])
+        # ================= FINAL OUTPUT =================
 
-                if scoring_team_id == team_id:
+        print("\n" + "=" * 85)
+        print(f"LAST {len(results)} TIMES {team_name.upper()} SCORED THE FIRST BASKET")
+        print("=" * 85)
 
-                    print(f"✅ {first['playerName']} scored first!")
+        if not results:
+            print("No instances found.")
+        else:
+            for i, r in enumerate(results, 1):
+                print(f"{i}. {r['date']} | {r['matchup']} | {r['season_type']}")
+                print(f"   Scorer : {r['player']}")
+                print(f"   Time   : {r['time']}")
+                print(f"   Desc   : {r['description']}")
+                print("-" * 80)
+
+    # ==================== TEAM VS OPPONENT MODE ====================
+    elif team_query_type == "O":
+
+        opponent_name = input("Enter the opponent team name >> ").strip()
+
+        # Find Opponent Team
+        opponent_list = teams.get_teams()
+
+        matched_opponent = None
+
+        for opp_team in opponent_list:
+
+            if (
+                opponent_name.lower() in opp_team['full_name'].lower()
+                or opponent_name.lower() in opp_team['nickname'].lower()
+                or opponent_name.lower() in opp_team['city'].lower()
+            ):
+                matched_opponent = opp_team
+                break
+
+        if not matched_opponent:
+            print("❌ Opponent team not found.")
+            exit()
+
+        opponent_id = matched_opponent['id']
+        opponent_name = matched_opponent['full_name']
+
+        print(f"✅ Found {opponent_name} (Team ID: {opponent_id})\n")
+
+        print(f"Scanning for the last {max_results} games {team_name.upper()} played vs {opponent_name.upper()}...\n")
+        print("Looking for who scored first in those games...\n")
+
+        for season_type in search_order:
+
+            if len(results) >= max_results:
+                break
+
+            print(f"→ Scanning {season_type} (2025-26)...")
+
+            try:
+                gamelog = teamgamelog.TeamGameLog(
+                    team_id=team_id,
+                    season="2025-26",
+                    season_type_all_star=season_type
+                )
+
+                games_df = gamelog.get_data_frames()[0]
+
+            except:
+                print(f"   Could not fetch {season_type} games.")
+                continue
+
+            if games_df.empty:
+                print(f"   No {season_type} games found.\n")
+                continue
+
+            for _, row in games_df.iterrows():
+
+                if len(results) >= max_results:
+                    break
+
+                game_id = row['Game_ID']
+                game_date = row['GAME_DATE']
+                matchup = row['MATCHUP']
+
+                # Check if this game is against the SPECIFIC opponent team by examining the matchup string
+                # Only match if the opponent's nickname or abbreviation is in the matchup
+                if not (opponent_name.lower() in matchup.lower() or 
+                        matched_opponent['abbreviation'].lower() in matchup.lower() or
+                        matched_opponent['nickname'].lower() in matchup.lower()):
+                    continue
+
+                print(f"   Checking {game_date} ({matchup})...", end=" ")
+
+                try:
+                    pbp = playbyplayv3.PlayByPlayV3(game_id=game_id)
+                    df = pbp.get_data_frames()[0]
+
+                    made_shots = df[
+                        (df['isFieldGoal'] == 1) &
+                        (df['shotResult'] == 'Made')
+                    ]
+
+                    if made_shots.empty:
+                        print("No shots")
+                        continue
+
+                    first = made_shots.iloc[0]
+                    first_scorer = first['playerName']
+                    scoring_team_id = int(first['teamId'])
+
+                    # Determine which team scored first
+                    if scoring_team_id == team_id:
+                        scored_by = f"{team_name}"
+                    else:
+                        scored_by = f"{opponent_name}"
+
+                    print(f"✅ First by {scored_by} ({first_scorer})")
 
                     results.append({
                         'date': game_date,
                         'matchup': matchup,
                         'season_type': season_type,
-                        'player': first['playerName'],
+                        'player': first_scorer,
+                        'team': scored_by,
                         'time': first['clock'],
                         'description': first['description']
                     })
 
-                else:
-                    print("Opponent scored first")
+                except Exception as e:
+                    print("Connection error - waiting...")
+                    time.sleep(3)
+                    continue
 
-            except Exception as e:
-                print("Connection error - waiting...")
-                time.sleep(3)
-                continue
+                time.sleep(random.uniform(0.8, 1.5))
 
-            time.sleep(random.uniform(0.8, 1.5))
+        # ================= FINAL OUTPUT =================
 
-    # ================= FINAL OUTPUT =================
+        print("\n" + "=" * 85)
+        print(f"LAST {len(results)} GAMES {team_name.upper()} vs {opponent_name.upper()} - FIRST BASKET SCORERS")
+        print("=" * 85)
 
-    print("\n" + "=" * 85)
-    print(f"LAST {len(results)} TIMES {team_name.upper()} SCORED THE FIRST BASKET")
-    print("=" * 85)
-
-    if not results:
-        print("No instances found.")
-    else:
-        for i, r in enumerate(results, 1):
-            print(f"{i}. {r['date']} | {r['matchup']} | {r['season_type']}")
-            print(f"   Scorer : {r['player']}")
-            print(f"   Time   : {r['time']}")
-            print(f"   Desc   : {r['description']}")
-            print("-" * 80)
+        if not results:
+            print("No games found between these teams.")
+        else:
+            for i, r in enumerate(results, 1):
+                print(f"{i}. {r['date']} | {r['matchup']} | {r['season_type']}")
+                print(f"   First Basket : {r['team']} ({r['player']})")
+                print(f"   Time         : {r['time']}")
+                print(f"   Desc         : {r['description']}")
+                print("-" * 80)
